@@ -656,52 +656,36 @@ static int ashmem_pin_unpin(struct ashmem_area *asma, unsigned long cmd,
 	return ret;
 }
 
-#ifdef CONFIG_OUTER_CACHE
-static unsigned int virtaddr_to_physaddr(unsigned int virtaddr)
+static int ashmem_cache_op(struct ashmem_area *asma,
+	void (*cache_func)(unsigned long vstart, unsigned long length,
+				unsigned long pstart))
 {
-	unsigned int physaddr = 0;
-	pgd_t *pgd_ptr = NULL;
-	pud_t *pud_ptr = NULL;
-	pmd_t *pmd_ptr = NULL;
-	pte_t *pte_ptr = NULL, pte;
+	int ret = 0;
+	struct vm_area_struct *vma;
+	if (!asma->vm_start)
+		return -EINVAL;
 
-	spin_lock(&current->mm->page_table_lock);
-	pgd_ptr = pgd_offset(current->mm, virtaddr);
-	if (pgd_none(*pgd_ptr) || pgd_bad(*pgd_ptr)) {
-		pr_err("Failed to convert virtaddr %x to pgd_ptr\n",
-			virtaddr);
+	down_read(&current->mm->mmap_sem);
+	vma = find_vma(current->mm, asma->vm_start);
+	if (!vma) {
+		ret = -EINVAL;
 		goto done;
 	}
-
-	pud_ptr = pud_offset(pgd_ptr, virtaddr);
-	if (pud_none(*pud_ptr) || pud_bad(*pud_ptr)) {
-		pr_err("Failed to convert pgd_ptr %p to pud_ptr\n",
-			(void *)pgd_ptr);
+	if (vma->vm_file != asma->file) {
+		ret = -EINVAL;
 		goto done;
 	}
-
-	pmd_ptr = pmd_offset(pud_ptr, virtaddr);
-	if (pmd_none(*pmd_ptr) || pmd_bad(*pmd_ptr)) {
-		pr_err("Failed to convert pud_ptr %p to pmd_ptr\n",
-			(void *)pud_ptr);
+	if ((asma->vm_start + asma->size) > vma->vm_end) {
+		ret = -EINVAL;
 		goto done;
 	}
-
-	pte_ptr = pte_offset_map(pmd_ptr, virtaddr);
-	if (!pte_ptr) {
-		pr_err("Failed to convert pmd_ptr %p to pte_ptr\n",
-			(void *)pmd_ptr);
-		goto done;
-	}
-	pte = *pte_ptr;
-	physaddr = pte_pfn(pte);
-	pte_unmap(pte_ptr);
+	cache_func(asma->vm_start, asma->size, 0);
 done:
-	spin_unlock(&current->mm->page_table_lock);
-	physaddr <<= PAGE_SHIFT;
-	return physaddr;
+	up_read(&current->mm->mmap_sem);
+	if (ret)
+		asma->vm_start = 0;
+	return ret;
 }
-#endif
 
 static long ashmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
