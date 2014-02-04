@@ -657,8 +657,7 @@ static int ashmem_pin_unpin(struct ashmem_area *asma, unsigned long cmd,
 }
 
 static int ashmem_cache_op(struct ashmem_area *asma,
-	void (*cache_func)(unsigned long vstart, unsigned long length,
-				unsigned long pstart))
+	void (*cache_func)(const void *vstart, const void *vend))
 {
 	int ret = 0;
 	struct vm_area_struct *vma;
@@ -679,7 +678,8 @@ static int ashmem_cache_op(struct ashmem_area *asma,
 		ret = -EINVAL;
 		goto done;
 	}
-	cache_func(asma->vm_start, asma->size, 0);
+	cache_func((void *)asma->vm_start,
+			(void *)(asma->vm_start + asma->size));
 done:
 	up_read(&current->mm->mmap_sem);
 	if (ret)
@@ -731,6 +731,15 @@ static long ashmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			sc.nr_to_scan = ret;
 			ashmem_shrink(&ashmem_shrinker, &sc);
 		}
+		break;
+	case ASHMEM_CACHE_FLUSH_RANGE:
+		ret = ashmem_cache_op(asma, &dmac_flush_range);
+		break;
+	case ASHMEM_CACHE_CLEAN_RANGE:
+		ret = ashmem_cache_op(asma, &dmac_clean_range);
+		break;
+	case ASHMEM_CACHE_INV_RANGE:
+		ret = ashmem_cache_op(asma, &dmac_inv_range);
 		break;
 	}
 
